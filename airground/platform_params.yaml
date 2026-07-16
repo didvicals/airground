@@ -1,0 +1,54 @@
+# RefBot-1 reference platform parameters.
+# Derived from market/research platforms — see docs/reference-platform.md.
+# All SI units unless noted.
+
+platform:
+  name: refbot-1
+  mass_kg: 1.8
+  # Geometry (envelope for planning inflation)
+  length_m: 0.45
+  width_m: 0.45
+  height_m: 0.20
+  wheel_diameter_m: 0.28
+
+battery:
+  capacity_wh: 66.6          # 3000 mAh 6S (CapsuleBot)
+  usable_fraction: 0.85      # depth-of-discharge + sag reserve
+  reserve_return_fraction: 0.15  # hard floor: energy reserved for return-to-operator
+
+power:
+  # P_total = base + mode-dependent term
+  avionics_base_w: 20.0      # LiDAR + compute + comms, always on
+  flight:
+    hover_w: 300.0           # momentum theory, 1.8 kg quad, 7" props, FM~0.55
+    # P(v) = hover_w * (1 + k_v * v^2)  — simple parasitic model, calibrate later
+    k_v_per_m2s2: 0.02
+  ground:
+    # P(v) = idle_w + k_roll * v   (rolling resistance dominated)
+    idle_w: 1.0
+    k_roll_w_per_ms: 7.0     # 8 W @ 1 m/s (CapsuleBot 5.2 W @ 0.5 m/s + margin)
+
+speed:
+  flight_max_ms: 3.0         # TABV demonstrated
+  flight_nominal_ms: 1.5
+  ground_max_ms: 1.5
+  ground_nominal_ms: 0.7
+
+acoustics:
+  # Sound pressure level at 1 m, per mode (CapsuleBot measured)
+  flight_spl_db_1m: 85.0
+  ground_spl_db_1m: 53.0
+  ambient_db: 43.0
+  wall_transmission_loss_db: 30.0   # typical interior drywall partition (25-35)
+  door_transmission_loss_db: 20.0
+
+terrain_limits:
+  ground_max_slope_deg: 10.0
+  ground_max_step_m: 0.03
+  # anything exceeding these forces flight mode
+
+transition:
+  land_duration_s: 5.0
+  land_energy_j: 15.0
+  takeoff_duration_s: 10.0
+  takeoff_energy_j: 900.0    # includes 1 m climb + stabilization at hover power
