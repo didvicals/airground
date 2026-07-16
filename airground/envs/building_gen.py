@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import random
 from collections import deque
-
 from functools import lru_cache
 
 from airground.environment import Building, Pose
@@ -63,7 +62,7 @@ def _floor_layout(rng: random.Random, rows: int, cols: int,
             for r in band:
                 g[r][d] = "#"
         # one door per room, not through the stairwell column
-        for left, right in zip(dividers, dividers[1:]):
+        for left, right in zip(dividers, dividers[1:], strict=False):
             cands = [c for c in range(left + 1, right) if c != stair_c]
             if cands:
                 dc = rng.choice(cands)

@@ -47,7 +47,7 @@ class Params:
     takeoff_energy_j: float
 
     @classmethod
-    def load(cls, path: Path = PARAMS_PATH) -> "Params":
+    def load(cls, path: Path = PARAMS_PATH) -> Params:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         return cls(
             mass_kg=raw["platform"]["mass_kg"],

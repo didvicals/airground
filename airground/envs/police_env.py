@@ -15,12 +15,11 @@ question is how close partial-observation arbitration gets to the oracle.
 
 from __future__ import annotations
 
-import numpy as np
-
 import gymnasium as gym
+import numpy as np
 from gymnasium import spaces
 
-from airground.environment import CELL_M, STAIR_TRANSIT_S, Building, Pose
+from airground.environment import CELL_M, STAIR_TRANSIT_S, Pose
 from airground.mission import Phase, phase_weights
 from airground.models import Mode, Params, power_w, transition_cost
 from airground.planner import Weights
@@ -62,9 +61,9 @@ class PoliceEnv(gym.Env):
             for r in range(self.b.rows):
                 for c in range(self.b.cols):
                     pose = Pose(f, r, c)
-                    if self.b.passable(pose, Mode.FLIGHT):
-                        if self.b.exposure_dbs(self.p, pose, Mode.FLIGHT, 1.0) > 0:
-                            m[r, c] = 1.0
+                    if (self.b.passable(pose, Mode.FLIGHT)
+                            and self.b.exposure_dbs(self.p, pose, Mode.FLIGHT, 1.0) > 0):
+                        m[r, c] = 1.0
             maps.append(m)
         return maps
 

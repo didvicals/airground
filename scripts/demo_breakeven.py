@@ -7,8 +7,16 @@ sanity check that grounds the mode-arbitration cost-function weights.
 Run: python sim/demo_breakeven.py
 """
 
-from airground.models import Mode, Params, detection_radius_m, endurance_min, \
-    power_w, received_spl_db, segment_energy_j, transition_cost
+from airground.models import (
+    Mode,
+    Params,
+    detection_radius_m,
+    endurance_min,
+    power_w,
+    received_spl_db,
+    segment_energy_j,
+    transition_cost,
+)
 
 
 def main() -> None:
@@ -33,7 +41,8 @@ def main() -> None:
 
     print("\nSegment cost, ground-capable path (energy J / time s),")
     print("flight includes takeoff+land transition overhead:")
-    print(f"  {'dist':>6s} | {'fly E':>8s} {'fly T':>6s} | {'drive E':>8s} {'drive T':>7s} | cheaper")
+    cols = ("dist", "fly E", "fly T", "drive E", "drive T")
+    print("  {:>6s} | {:>8s} {:>6s} | {:>8s} {:>7s} | cheaper".format(*cols))
     for d in (5, 10, 20, 50, 100):
         ef, tf = segment_energy_j(p, Mode.FLIGHT, d)
         te, tt = transition_cost(p, Mode.GROUND, Mode.FLIGHT)

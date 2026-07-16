@@ -11,9 +11,13 @@ Requires: pip install -e .[train]
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
+import time
 from pathlib import Path
 
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from airground.envs import PoliceEnv, generate
@@ -64,6 +68,18 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
+    # run metadata: reproduce any checkpoint from commit + args
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        commit = "unknown"
+    (out / "run_info.json").write_text(json.dumps({
+        "commit": commit,
+        "args": vars(args),
+        "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }, indent=2))
+
     venv = SubprocVecEnv([make_env for _ in range(args.nenv)])
     if args.resume:
         model = PPO.load(args.resume, env=venv)
@@ -72,7 +88,10 @@ def main() -> None:
                     tensorboard_log=str(out / "tb"),
                     n_steps=512, batch_size=1024, learning_rate=3e-4,
                     gamma=0.995, ent_coef=0.01)
-    model.learn(total_timesteps=args.steps, progress_bar=True)
+    # periodic checkpoints: survive Colab session drops mid-run
+    ckpt = CheckpointCallback(save_freq=max(250_000 // args.nenv, 1),
+                              save_path=str(out / "ckpt"), name_prefix="ppo")
+    model.learn(total_timesteps=args.steps, progress_bar=True, callback=ckpt)
     model.save(out / "final")
     evaluate(model)
 
