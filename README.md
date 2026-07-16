@@ -54,8 +54,31 @@ hours-scale on Colab CPU/GPU with 8 vectorized envs.
 ## Run
 
 ```
-pip install -e .            # or .[train] for PPO
+pip install -e .            # or .[train] for PPO + imitation
 python tests/test_framework.py
-python scripts/evaluate.py  # baseline comparison table
-python scripts/train_ppo.py --steps 200000 --nenv 4   # CPU smoke train
+python scripts/diagnose.py   # solvability + sparse-reward severity
+python scripts/evaluate.py   # oracle baseline comparison table
+python scripts/bc_pretrain.py --episodes 3000 --out runs/bc_v0   # warm-start
+python scripts/train_ppo.py --bc-init runs/bc_v0/bc_policy.zip --steps 2000000
+python scripts/rollout.py --model runs/ppo_v0/final.zip           # inspect
 ```
+
+## Training notes
+
+First PPO run collapsed to 0% success (worse than random's 10%). Root cause:
+sparse terminal reward + per-step negative cost -> the policy minimized
+activity instead of reaching the goal; the +50 goal bonus was never
+discovered by exploration (townhouse needs a 40-step precise sequence).
+`scripts/diagnose.py` confirmed the env itself is fully solvable (greedy
+descent on the goal-distance field reaches goal 100%).
+
+Fixes applied:
+1. **Potential-based reward shaping** (`shaping_coef` in `PoliceEnv`): dense
+   gradient toward goal via `gamma*Phi(s') - Phi(s)`, `Phi = -dist_to_goal`.
+   Policy-invariant (Ng et al. 1999). Turns goal-reaching return positive.
+2. **Reward normalization** (`VecNormalize`) in training.
+3. **BC warm-start** (`airground/experts.py` + `bc_pretrain.py`): clone the
+   100%-success greedy expert, then PPO fine-tunes for cost trade-offs.
+
+If success stays low, escalate: curriculum (2-floor maps first), then
+`RecurrentPPO` (sb3-contrib) since the 9x9 crop is a partial observation.

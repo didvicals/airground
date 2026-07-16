@@ -49,7 +49,7 @@ def test_env_api_random_rollout():
 
 
 def test_env_ground_step_costs_less_than_flight():
-    env = PoliceEnv()  # fixed townhouse
+    env = PoliceEnv(shaping_coef=0.0)  # fixed townhouse, no shaping
     env.reset(seed=0)
     assert env.mode is Mode.GROUND
     _, r_ground, *_ = env.step(0)  # move in ground mode
@@ -59,9 +59,20 @@ def test_env_ground_step_costs_less_than_flight():
     assert r_ground > r_flight  # less negative = cheaper
 
 
+def test_shaping_rewards_goal_progress():
+    """PBRS must not change which trajectories reach the goal, but must make
+    goal-reaching return strictly positive (the fix for the 0% collapse)."""
+    from airground.experts import greedy_eval  # scripted expert
+    sr, ret = greedy_eval(None, n=20)
+    assert sr == 1.0                 # env solvable by sane policy
+    assert ret > 0.0                 # shaped return positive at goal
+    assert np.isfinite(ret)
+
+
 if __name__ == "__main__":
     test_generator_valid_buildings()
     test_planner_townhouse_regression()
     test_env_api_random_rollout()
     test_env_ground_step_costs_less_than_flight()
+    test_shaping_rewards_goal_progress()
     print("all tests passed")

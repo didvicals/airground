@@ -18,7 +18,7 @@ from pathlib import Path
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 
 from airground.envs import PoliceEnv, generate
 from airground.mission import Phase, phase_weights
@@ -63,6 +63,8 @@ def main() -> None:
     ap.add_argument("--nenv", type=int, default=8)
     ap.add_argument("--out", type=str, default="runs/ppo_v0")
     ap.add_argument("--resume", type=str, default=None)
+    ap.add_argument("--bc-init", type=str, default=None,
+                    help="BC policy .zip to warm-start from (scripts/bc_pretrain.py)")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -81,6 +83,9 @@ def main() -> None:
     }, indent=2))
 
     venv = SubprocVecEnv([make_env for _ in range(args.nenv)])
+    # normalize reward: step costs and shaping span orders of magnitude;
+    # unnormalized returns make PPO's value target unstable
+    venv = VecNormalize(venv, norm_obs=False, norm_reward=True, gamma=0.995)
     if args.resume:
         model = PPO.load(args.resume, env=venv)
     else:
@@ -88,6 +93,11 @@ def main() -> None:
                     tensorboard_log=str(out / "tb"),
                     n_steps=512, batch_size=1024, learning_rate=3e-4,
                     gamma=0.995, ent_coef=0.01)
+        if args.bc_init:
+            from stable_baselines3.common.policies import ActorCriticPolicy
+            bc_policy = ActorCriticPolicy.load(args.bc_init)
+            model.policy.load_state_dict(bc_policy.state_dict())
+            print(f"warm-started policy from {args.bc_init}")
     # periodic checkpoints: survive Colab session drops mid-run
     ckpt = CheckpointCallback(save_freq=max(250_000 // args.nenv, 1),
                               save_path=str(out / "ckpt"), name_prefix="ppo")

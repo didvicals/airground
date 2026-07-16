@@ -38,13 +38,18 @@ class PoliceEnv(gym.Env):
 
     def __init__(self, building_fn=None, phase: Phase = Phase.APPROACH,
                  crop: int = 9, max_steps: int = 500,
-                 params: Params | None = None):
+                 params: Params | None = None,
+                 shaping_coef: float = 1.0, gamma: float = 0.995):
         super().__init__()
         self.p = params or Params.load()
         self.building_fn = building_fn  # callable(seed) -> Building; None = fixed townhouse
         self.phase = phase
         self.crop = crop
         self.max_steps = max_steps
+        # potential-based reward shaping (Ng et al. 1999): dense gradient
+        # toward goal, provably policy-invariant. shaping_coef=0 disables.
+        self.shaping_coef = shaping_coef
+        self.gamma = gamma
 
         n_scalar = 11
         self.observation_space = spaces.Box(
@@ -52,6 +57,39 @@ class PoliceEnv(gym.Env):
         self.action_space = spaces.Discrete(8)
 
     # ------------------------------------------------------------ helpers
+
+    def _goal_distance_field(self) -> list[np.ndarray]:
+        """Per-floor min step-distance to goal over the flight graph.
+
+        Flight-passable 4-connectivity plus bidirectional stair transit.
+        Flight reachability is a superset of ground's, so this is an
+        admissible-ish shaping potential (PBRS is valid for any potential,
+        so approximation only affects guidance strength, never correctness).
+        Unreachable cells get a large finite value.
+        """
+        from collections import deque
+        big = float(self.b.n_floors * self.b.rows * self.b.cols)
+        dist = [np.full((self.b.rows, self.b.cols), big, dtype=np.float32)
+                for _ in range(self.b.n_floors)]
+        g = self.b.goal
+        dist[g.floor][g.r, g.c] = 0.0
+        q = deque([(g.floor, g.r, g.c)])
+        while q:
+            f, r, c = q.popleft()
+            d = dist[f][r, c]
+            neigh = [(f, r + dr, c + dc) for dr, dc in
+                     ((1, 0), (-1, 0), (0, 1), (0, -1))]
+            if self.b.is_stair(Pose(f, r, c)):
+                neigh += [(f + 1, r, c), (f - 1, r, c)]
+            for nf, nr, nc in neigh:
+                p = Pose(nf, nr, nc)
+                if self.b.passable(p, Mode.FLIGHT) and dist[nf][nr, nc] > d + 1:
+                    dist[nf][nr, nc] = d + 1
+                    q.append((nf, nr, nc))
+        return dist
+
+    def _potential(self, pose: Pose) -> float:
+        return -float(self.dist[pose.floor][pose.r, pose.c])
 
     def _audible_fly_map(self) -> list[np.ndarray]:
         """Per floor: 1.0 where flying would be audible at the suspect."""
@@ -123,6 +161,8 @@ class PoliceEnv(gym.Env):
         self.total_time = 0.0
         self.total_exposure = 0.0
         self.audible_fly = self._audible_fly_map()
+        self.dist = self._goal_distance_field()
+        self._prev_potential = self._potential(self.pose)
         return self._obs(), {}
 
     def step(self, action: int):
@@ -174,19 +214,23 @@ class PoliceEnv(gym.Env):
             reward -= self._cost(e, BUMP_TIME_S, 0.0) + 0.1
             self._account(e, BUMP_TIME_S, 0.0)
 
-        terminated = False
+        # potential-based shaping: coef * (gamma*Phi(s') - Phi(s))
+        phi = self._potential(self.pose)
+        reward += self.shaping_coef * (self.gamma * phi - self._prev_potential)
+        self._prev_potential = phi
+
+        terminated = reached_goal = False
         g = self.b.goal
         if (self.pose.floor, self.pose.r, self.pose.c) == (g.floor, g.r, g.c):
             reward += GOAL_BONUS
-            terminated = True
+            terminated = reached_goal = True
         elif self.battery_j <= self.usable_j * self.p.reserve_return_fraction:
             reward -= DEAD_BATTERY_PENALTY
             terminated = True
 
         truncated = self.steps >= self.max_steps
         info = {"energy_j": self.total_energy, "time_s": self.total_time,
-                "exposure_dbs": self.total_exposure,
-                "success": terminated and reward > 0}
+                "exposure_dbs": self.total_exposure, "success": reached_goal}
         return self._obs(), reward, terminated, truncated, info
 
     def _account(self, e: float, dt: float, exp: float) -> None:
