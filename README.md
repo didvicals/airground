@@ -58,8 +58,7 @@ pip install -e .            # or .[train] for PPO + imitation
 python tests/test_framework.py
 python scripts/diagnose.py   # solvability + sparse-reward severity
 python scripts/evaluate.py   # oracle baseline comparison table
-python scripts/bc_pretrain.py --episodes 3000 --out runs/bc_v0   # warm-start
-python scripts/train_ppo.py --bc-init runs/bc_v0/bc_policy.zip --steps 2000000
+python scripts/train_ppo.py --bc-episodes 3000 --steps 2000000    # BC + PPO
 python scripts/rollout.py --model runs/ppo_v0/final.zip           # inspect
 ```
 
@@ -77,8 +76,10 @@ Fixes applied:
    gradient toward goal via `gamma*Phi(s') - Phi(s)`, `Phi = -dist_to_goal`.
    Policy-invariant (Ng et al. 1999). Turns goal-reaching return positive.
 2. **Reward normalization** (`VecNormalize`) in training.
-3. **BC warm-start** (`airground/experts.py` + `bc_pretrain.py`): clone the
-   100%-success greedy expert, then PPO fine-tunes for cost trade-offs.
+3. **BC warm-start** (`--bc-episodes` in `train_ppo.py`): hand-rolled behavior
+   cloning of the 100%-success greedy expert (`airground/experts.py`) directly
+   on the SB3 policy — no `imitation` dependency — then PPO fine-tunes for cost
+   trade-offs.
 
 If success stays low, escalate: curriculum (2-floor maps first), then
 `RecurrentPPO` (sb3-contrib) since the 9x9 crop is a partial observation.

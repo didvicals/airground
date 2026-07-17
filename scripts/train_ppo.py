@@ -21,6 +21,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 
 from airground.envs import PoliceEnv, generate
+from airground.experts import collect_demos
 from airground.mission import Phase, phase_weights
 from airground.models import Params
 from airground.planner import plan
@@ -28,6 +29,43 @@ from airground.planner import plan
 
 def make_env():
     return PoliceEnv(building_fn=generate)
+
+
+def bc_warmstart(model: PPO, n_episodes: int, epochs: int,
+                 batch: int = 512, lr: float = 1e-3) -> None:
+    """Supervised warm-start of the PPO policy from the greedy expert.
+
+    Hand-rolled behavior cloning on SB3's own ActorCriticPolicy (cross-entropy
+    on the action distribution) — no external imitation-learning dependency,
+    so it never conflicts with Colab's preinstalled package set.
+    """
+    import numpy as np
+    import torch
+
+    print(f"BC: collecting {n_episodes} expert episodes...")
+    obs, acts = collect_demos(generate, n_episodes=n_episodes)
+    print(f"BC: {len(obs)} state-action pairs; cloning {epochs} epochs")
+    device = model.device
+    obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
+    act_t = torch.as_tensor(acts, dtype=torch.long, device=device)
+    opt = torch.optim.Adam(model.policy.parameters(), lr=lr)
+    n = len(obs_t)
+    for ep in range(epochs):
+        perm = torch.randperm(n, device=device)
+        total, nb = 0.0, 0
+        for i in range(0, n, batch):
+            idx = perm[i:i + batch]
+            dist = model.policy.get_distribution(obs_t[idx])
+            loss = -dist.log_prob(act_t[idx]).mean()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            total += loss.item()
+            nb += 1
+        acc = float((model.policy.predict(obs, deterministic=True)[0]
+                     == np.asarray(acts)).mean())
+        print(f"  BC epoch {ep + 1}/{epochs}: loss {total / nb:.3f}, "
+              f"expert-action acc {acc:.2%}")
 
 
 def evaluate(model: PPO, n_episodes: int = 50) -> None:
@@ -63,8 +101,9 @@ def main() -> None:
     ap.add_argument("--nenv", type=int, default=8)
     ap.add_argument("--out", type=str, default="runs/ppo_v0")
     ap.add_argument("--resume", type=str, default=None)
-    ap.add_argument("--bc-init", type=str, default=None,
-                    help="BC policy .zip to warm-start from (scripts/bc_pretrain.py)")
+    ap.add_argument("--bc-episodes", type=int, default=0,
+                    help="expert episodes for BC warm-start (0 = shaping only)")
+    ap.add_argument("--bc-epochs", type=int, default=15)
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -93,11 +132,8 @@ def main() -> None:
                     tensorboard_log=str(out / "tb"),
                     n_steps=512, batch_size=1024, learning_rate=3e-4,
                     gamma=0.995, ent_coef=0.01)
-        if args.bc_init:
-            from stable_baselines3.common.policies import ActorCriticPolicy
-            bc_policy = ActorCriticPolicy.load(args.bc_init)
-            model.policy.load_state_dict(bc_policy.state_dict())
-            print(f"warm-started policy from {args.bc_init}")
+        if args.bc_episodes > 0:
+            bc_warmstart(model, args.bc_episodes, args.bc_epochs)
     # periodic checkpoints: survive Colab session drops mid-run
     ckpt = CheckpointCallback(save_freq=max(250_000 // args.nenv, 1),
                               save_path=str(out / "ckpt"), name_prefix="ppo")
